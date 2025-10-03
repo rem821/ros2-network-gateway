@@ -2,9 +2,14 @@
 // Created by standa on 10/2/25.
 //
 #pragma once
+#include <span>
 #include <string>
 #include <nlohmann/json.hpp>
 #include <rclcpp/node.hpp>
+#include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
+#include <rosidl_typesupport_introspection_cpp/field_types.hpp>
+#include <rosidl_typesupport_cpp/message_type_support.hpp>
+#include <rclcpp/typesupport_helpers.hpp>
 
 class SubscriptionManager
 {

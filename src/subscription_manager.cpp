@@ -2,9 +2,6 @@
 // Created by standa on 10/2/25.
 //
 
-#include <rosidl_typesupport_introspection_cpp/message_introspection.hpp>
-#include <rosidl_typesupport_introspection_cpp/field_types.hpp>
-#include <rosidl_typesupport_cpp/message_type_support.hpp>
 #include <utility>
 #include <zstd.h>
 #include "ros2_network_gateway/subscription_manager.hpp"
@@ -22,9 +19,14 @@ SubscriptionManager::SubscriptionManager(rclcpp::Node::SharedPtr node, std::stri
 
 void SubscriptionManager::subscribe()
 {
+    if (topicName_ == "/loki_1/debug/teb/feedback") return;
+    if (topicName_ == "/map_diff_vect") return;
+    if (topicName_ == "/loki_1/teb_obstacles") return;
+    if (topicName_ == "/shared_plans") return;
+
     RCLCPP_INFO(node_->get_logger(), "Subscribing to topic %s", topicName_.c_str());
-    try
-    {
+    // try
+    // {
         subscriber_ = node_->create_generic_subscription(
             topicName_, topicType_, rclcpp::QoS(1),
             [this, node = node_, topicName = topicName_, topicType = topicType_](
@@ -32,12 +34,12 @@ void SubscriptionManager::subscribe()
             {
                 this->handleMessage(node, topicName, topicType, serializedMsg);
             });
-    }
-    catch (...)
-    {
-        RCLCPP_ERROR(node_->get_logger(), "Failed to subscribe to topic %s of type %s", topicName_.c_str(),
-                     topicType_.c_str());
-    }
+    // }
+    // catch (...)
+    // {
+    //     RCLCPP_ERROR(node_->get_logger(), "Failed to subscribe to topic %s of type %s", topicName_.c_str(),
+    //                  topicType_.c_str());
+    // }
 }
 
 
@@ -49,8 +51,7 @@ void SubscriptionManager::handleMessage(
 {
     // 1. Lookup type support for this message type
     const auto lib = rclcpp::get_typesupport_library(type, "rosidl_typesupport_introspection_cpp");
-    const rosidl_message_type_support_t* ts = rclcpp::get_message_typesupport_handle(
-        type, "rosidl_typesupport_introspection_cpp", *lib);
+    const rosidl_message_type_support_t* ts = rclcpp::get_typesupport_handle(type, "rosidl_typesupport_introspection_cpp", *lib);
 
     if (!ts)
     {
@@ -81,7 +82,13 @@ void SubscriptionManager::handleMessage(
 
     // 4. Convert to JSON recursively
     const nlohmann::json j = messageToJson(untyped_msg, members);
-    data_ = j.dump();
+    try {
+        data_ = j.dump();
+        hasData_ = true;
+    } catch (...) {
+        RCLCPP_ERROR(node->get_logger(), "Couldnt convert the stream to JSON");
+    }
+
     // 5. Print JSON
     //RCLCPP_INFO(node->get_logger(), "Topic %s (%s): %s", topic.c_str(), type.c_str(), data_.c_str());
     // 6. Cleanup
