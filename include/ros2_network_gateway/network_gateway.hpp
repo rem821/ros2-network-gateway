@@ -30,7 +30,7 @@ private:
     std::vector<uint8_t> createHeader(const std::string& topic, const std::string& type);
 
     std::string networkInterfaceName_;
-    std::vector<std::string> topics_;
+    std::vector<std::string> requestedTopics_;
     uint16_t topicRefreshRate_ = 5000;
     uint16_t topicPublishRate_ = 500;
 

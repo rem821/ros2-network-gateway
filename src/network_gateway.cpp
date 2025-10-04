@@ -19,8 +19,8 @@ void NetworkGateway::loadParameters()
     this->declare_parameter("network_interface", "UDP");
     this->get_parameter("network_interface", this->networkInterfaceName_);
 
-    this->declare_parameter("topics", std::vector<std::string>{});
-    this->get_parameter("topics", topics_);
+    this->declare_parameter("topics", std::vector<std::string>{"/DirectionVelocity", "/arco/idmind_imu/imu"});
+    this->get_parameter("topics", requestedTopics_);
 
     this->declare_parameter("topic_refresh_rate", 5000);
     this->get_parameter("topic_refresh_rate", topicRefreshRate_);
@@ -54,16 +54,19 @@ void NetworkGateway::subscribeTopics()
 
     RCLCPP_INFO(get_logger(), "Subscribing to topics from the ROS2 graph ...");
     const auto allTopicsAndTypes = this->get_topic_names_and_types();
-    for (const auto& topic : allTopicsAndTypes)
-    {
-        std::string topicName = topic.first;
-        if (topic.second.empty()) { continue; }
-        std::string topicType = topic.second[0];
+    std::unordered_set<std::string> currentTopics;
+    for (const auto &[topicName, topicType]: allTopicsAndTypes) {
+        currentTopics.insert(topicName);
 
+        if (topicType.empty()) { continue; }
+
+        // Whitelist filtering
+        if (!requestedTopics_.empty() && std::ranges::find(requestedTopics_, topicName) == requestedTopics_.end()) { continue; }
+        // Skip already subscribed
         if (subscribedTopics_.contains(topicName)) { continue; }
 
-        RCLCPP_INFO(get_logger(), "Found topic %s of type %s", topicName.c_str(), topicType.c_str());
-        auto manager = std::make_shared<SubscriptionManager>(this->shared_from_this(), topicName, topicType, 3);
+        RCLCPP_INFO(get_logger(), "Found topic %s of type %s", topicName.c_str(), topicType[0].c_str());
+        auto manager = std::make_shared<SubscriptionManager>(this->shared_from_this(), topicName, topicType[0], 3);
         subscriptionManagers_.emplace_back(
             topicName, manager
         );
@@ -72,11 +75,24 @@ void NetworkGateway::subscribeTopics()
         networkGatewayTimers_.emplace_back(
             this->create_wall_timer(
                 std::chrono::milliseconds(topicPublishRate_),
-                [this, manager]()
-                {
+                [this, manager]() {
                     sendData(manager);
                 }
             ));
+    }
+
+    // Unsubscribe from non-existent topics
+    for (auto it = subscriptionManagers_.begin(); it != subscriptionManagers_.end(); )
+    {
+        const std::string& topicName = it->first;
+        if (!currentTopics.contains(topicName))
+        {
+            RCLCPP_WARN(get_logger(), "Topic %s disappeared — unsubscribing", topicName.c_str());
+            subscribedTopics_.erase(topicName);
+            it = subscriptionManagers_.erase(it);  // drop SubscriptionManager
+        }
+        else
+            ++it;
     }
 }
 
