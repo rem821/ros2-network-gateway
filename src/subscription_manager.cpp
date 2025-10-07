@@ -19,11 +19,6 @@ SubscriptionManager::SubscriptionManager(rclcpp::Node::SharedPtr node, std::stri
 
 void SubscriptionManager::subscribe()
 {
-    if (topicName_ == "/loki_1/debug/teb/feedback") return;
-    if (topicName_ == "/map_diff_vect") return;
-    if (topicName_ == "/loki_1/teb_obstacles") return;
-    if (topicName_ == "/shared_plans") return;
-
     RCLCPP_INFO(node_->get_logger(), "Subscribing to topic %s", topicName_.c_str());
     // try
     // {

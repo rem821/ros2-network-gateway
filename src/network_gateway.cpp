@@ -19,7 +19,7 @@ void NetworkGateway::loadParameters()
     this->declare_parameter("network_interface", "UDP");
     this->get_parameter("network_interface", this->networkInterfaceName_);
 
-    this->declare_parameter("topics", std::vector<std::string>{"/DirectionVelocity", "/arco/idmind_imu/imu"});
+    this->declare_parameter("topics", std::vector<std::string>{"/loki_1/chassis/battery_voltage", "/loki_1/chassis/clock", "/loki_1/gamepad_state"});
     this->get_parameter("topics", requestedTopics_);
 
     this->declare_parameter("topic_refresh_rate", 5000);
@@ -28,9 +28,9 @@ void NetworkGateway::loadParameters()
     this->declare_parameter("topic_publish_rate", 500);
     this->get_parameter("topic_publish_rate", topicPublishRate_);
 
-    this->declare_parameter("local_address", std::string("127.0.0.1"));
+    this->declare_parameter("local_address", std::string("10.0.0.114"));
     this->declare_parameter("receive_port", 8500);
-    this->declare_parameter("remote_address", std::string("127.0.0.1"));
+    this->declare_parameter("remote_address", std::string("10.0.20.219"));
     this->declare_parameter("send_port", 8502);
 
     this->get_parameter("local_address", localAddress_);

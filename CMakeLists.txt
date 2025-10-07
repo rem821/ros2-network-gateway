@@ -40,4 +40,11 @@ ament_target_dependencies(network_gateway
 install(TARGETS network_gateway
         DESTINATION lib/${PROJECT_NAME})
 
+# Testing configuration
+include(CTest)
+if (BUILD_TESTING)
+    # Simple smoke test to demonstrate CTest wiring without adding new sources
+    add_test(NAME smoke COMMAND ${CMAKE_COMMAND} -E echo "smoke-ok")
+endif ()
+
 ament_package()
