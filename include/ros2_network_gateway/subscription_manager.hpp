@@ -11,13 +11,13 @@
 #include <rosidl_typesupport_cpp/message_type_support.hpp>
 #include <rclcpp/typesupport_helpers.hpp>
 
-class SubscriptionManager
-{
+class SubscriptionManager {
 public:
     SubscriptionManager(rclcpp::Node::SharedPtr node, std::string topicName,
                         std::string topicType, uint8_t compressionLevel);
 
     void checkSubscription();
+
     [[nodiscard]] bool hasData() const { return hasData_; }
 
     // std::vector<uint8_t> getData(bool wipe)
@@ -27,26 +27,39 @@ public:
     //     return data;
     // }
 
-    std::string getData(bool wipe)
-    {
+    std::string getData(bool wipe) {
         std::string data = data_;
-        if (wipe) { data_.clear(); hasData_ = false; }
+        if (wipe) {
+            data_.clear();
+            hasData_ = false;
+        }
         return data;
     }
+
+    [[nodiscard]] std::string getMessageProto() { return messageProto_; }
 
     [[nodiscard]] std::string getTopicName() const { return topicName_; }
     [[nodiscard]] std::string getTopicType() const { return topicType_; }
 
 private:
     void subscribe();
-    void handleMessage(const rclcpp::Node::SharedPtr& node, const std::string& topic, const std::string& type,
-                       const std::shared_ptr<const rclcpp::SerializedMessage>& serializedMsg);
 
-    nlohmann::json memberToJson(const void* field, const rosidl_typesupport_introspection_cpp::MessageMember& member);
-    nlohmann::json messageToJson(const void* msg, const rosidl_typesupport_introspection_cpp::MessageMembers* members);
-    static nlohmann::json rosTypeToJson(const rosidl_typesupport_introspection_cpp::MessageMember* member, const void* elem);
+    void handleMessage(const rclcpp::Node::SharedPtr &node, const std::string &topic, const std::string &type,
+                       const std::shared_ptr<const rclcpp::SerializedMessage> &serializedMsg);
 
-    [[nodiscard]] std::vector<uint8_t> compress(std::vector<uint8_t> const& data) const;
+    nlohmann::json describeMessageType(const rosidl_typesupport_introspection_cpp::MessageMembers *members);
+
+    static std::string rosTypeToString(uint8_t typeId);
+
+    nlohmann::json memberToJson(const void *field, const rosidl_typesupport_introspection_cpp::MessageMember &member);
+
+    nlohmann::json messageToJson(const void *msg, const rosidl_typesupport_introspection_cpp::MessageMembers *members);
+
+    static nlohmann::json rosTypeToJson(const rosidl_typesupport_introspection_cpp::MessageMember *member,
+                                        const void *elem);
+
+    [[nodiscard]] std::vector<uint8_t> compress(std::vector<uint8_t> const &data) const;
+
     static std::vector<uint8_t> decompress(std::span<const uint8_t> compressedData);
 
     rclcpp::Node::SharedPtr node_;
@@ -56,7 +69,7 @@ private:
 
     rclcpp::GenericSubscription::SharedPtr subscriber_;
 
+    std::string messageProto_;
     bool hasData_ = false;
-    //std::vector<uint8_t> data_;
     std::string data_;
 };
