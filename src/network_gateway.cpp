@@ -1,3 +1,11 @@
+/**
+ * @file network_gateway.cpp
+ * @brief Implementation of the NetworkGateway ROS2 node.
+ *
+ * Entry point for the ros2_network_gateway package. Creates the node,
+ * loads parameters, discovers topics, and forwards them over UDP.
+ */
+#include <algorithm>
 #include <cstdio>
 #include <rclcpp/rclcpp.hpp>
 #include "ros2_network_gateway/network_interfaces/udp_interface.hpp"
@@ -27,15 +35,19 @@ void NetworkGateway::loadParameters() {
     this->declare_parameter("topic_publish_rate", 500);
     this->get_parameter("topic_publish_rate", topicPublishRate_);
 
-    this->declare_parameter("local_address", std::string("10.0.0.114"));
+    this->declare_parameter("local_address", std::string("10.0.0.230"));
     this->declare_parameter("receive_port", 8500);
     this->declare_parameter("remote_address", std::string("10.0.20.219"));
     this->declare_parameter("send_port", 8502);
+    this->declare_parameter("compression_level", 0);
 
     this->get_parameter("local_address", localAddress_);
     this->get_parameter("receive_port", receivePort_);
     this->get_parameter("remote_address", remoteAddress_);
     this->get_parameter("send_port", sendPort_);
+    int compressionParam = 0;
+    this->get_parameter("compression_level", compressionParam);
+    compressionLevel_ = static_cast<uint8_t>(std::clamp(compressionParam, 0, 22));
 
     topicCheckTimer_ = this->create_wall_timer(
         std::chrono::milliseconds(topicRefreshRate_),
@@ -52,26 +64,28 @@ void NetworkGateway::subscribeTopics() {
 
     RCLCPP_INFO(get_logger(), "Subscribing to topics from the ROS2 graph ...");
     const auto allTopicsAndTypes = this->get_topic_names_and_types();
+
+    // Track which topics are currently alive so we can prune disappeared ones below.
     std::unordered_set<std::string> currentTopics;
     for (const auto &[topicName, topicType]: allTopicsAndTypes) {
         currentTopics.insert(topicName);
 
         if (topicType.empty()) { continue; }
 
-        // Whitelist filtering
+        // Whitelist filtering — empty list means "forward everything".
         if (!requestedTopics_.empty() && std::ranges::find(requestedTopics_, topicName) == requestedTopics_.end()) {
             continue;
         }
-        // Skip already subscribed
         if (subscribedTopics_.contains(topicName)) { continue; }
 
         RCLCPP_INFO(get_logger(), "Found topic %s of type %s", topicName.c_str(), topicType[0].c_str());
-        auto manager = std::make_shared<SubscriptionManager>(this->shared_from_this(), topicName, topicType[0], 3);
+        auto manager = std::make_shared<SubscriptionManager>(this->shared_from_this(), topicName, topicType[0], compressionLevel_);
         subscriptionManagers_.emplace_back(
             topicName, manager
         );
         subscribedTopics_.insert(topicName);
 
+        // Proto timer — sends the JSON schema every 5 s so the client knows the structure.
         networkGatewayTimers_.emplace_back(
             this->create_wall_timer(
                 std::chrono::seconds(5),
@@ -79,6 +93,7 @@ void NetworkGateway::subscribeTopics() {
                     sendData(manager, true);
                 }
             ));
+        // Data timer — sends the latest message value at the configured rate.
         networkGatewayTimers_.emplace_back(
             this->create_wall_timer(
                 std::chrono::milliseconds(topicPublishRate_),
@@ -88,13 +103,13 @@ void NetworkGateway::subscribeTopics() {
             ));
     }
 
-    // Unsubscribe from non-existent topics
+    // Prune subscriptions for topics that no longer exist on the graph.
     for (auto it = subscriptionManagers_.begin(); it != subscriptionManagers_.end();) {
         const std::string &topicName = it->first;
         if (!currentTopics.contains(topicName)) {
             RCLCPP_WARN(get_logger(), "Topic %s disappeared — unsubscribing", topicName.c_str());
             subscribedTopics_.erase(topicName);
-            it = subscriptionManagers_.erase(it); // drop SubscriptionManager
+            it = subscriptionManagers_.erase(it);
         } else
             ++it;
     }
@@ -110,8 +125,8 @@ void NetworkGateway::loadNetworkInterface() {
     }
 }
 
-void NetworkGateway::receiveData(std::span<const uint8_t> data) {
-    // TODO: Parse incoming messages and pass them to ROS2
+void NetworkGateway::receiveData(std::span<const uint8_t> /* data */) {
+    // TODO: Parse incoming messages and publish them onto ROS2 topics
 }
 
 void NetworkGateway::sendData(const std::shared_ptr<SubscriptionManager> &manager, const bool sendProto) {
@@ -125,16 +140,16 @@ void NetworkGateway::sendData(const std::shared_ptr<SubscriptionManager> &manage
 
     std::string data;
     if (sendProto) { data = manager->getMessageProto(); } else { data = manager->getData(false); }
-    //TODO: Think about what to do with an already read messages
 
     if (data.empty()) { return; }
 
     auto now = std::chrono::system_clock::now();
     const std::string &topic = manager->getTopicName();
     const std::string &type = manager->getTopicType();
-    auto header = createHeader(topic, type);
+    // Proto packets are never compressed (they're small JSON schemas).
+    bool compressed = !sendProto && manager->isCompressed();
+    auto header = createHeader(topic, type, compressed);
 
-    // Form message
     std::vector<uint8_t> message;
     message.reserve(header.size() + data.size());
     message.insert(message.end(), header.begin(), header.end());
@@ -155,28 +170,30 @@ void NetworkGateway::sendData(const std::shared_ptr<SubscriptionManager> &manage
 
 void NetworkGateway::checkNetworkHealth() {
     if (!networkInterface_) {
-        networkInterface_->initialize(shared_from_this(),
-                                      std::bind(&NetworkGateway::receiveData, this, std::placeholders::_1));
-        RCLCPP_INFO(this->get_logger(), "Network interface has been reinitialized");
+        RCLCPP_WARN(this->get_logger(), "Network interface is null, attempting to recreate");
+        loadNetworkInterface();
+        if (networkInterface_) {
+            networkInterface_->open();
+        }
         return;
     }
     if (networkInterface_->has_failed()) {
-        RCLCPP_INFO(this->get_logger(), "Network interface has failed. Resetting");
+        RCLCPP_WARN(this->get_logger(), "Network interface has failed. Resetting");
         networkInterface_->close();
         networkInterface_->open();
     }
 }
 
-std::vector<uint8_t> NetworkGateway::createHeader(const std::string &topic, const std::string &type) {
+std::vector<uint8_t> NetworkGateway::createHeader(const std::string &topic, const std::string &type, bool compressed) {
+    // Wire format: [8B timestamp (double, LE)][1B compressed flag][topic\0][type\0]
     double current_time = rclcpp::Clock().now().seconds();
     auto current_time_bytes = std::bit_cast<std::array<uint8_t, sizeof(current_time)> >(current_time);
 
-    int header_length = current_time_bytes.size() + topic.size() + 1 + type.size() + 1;
-
     std::vector<uint8_t> header;
-    header.reserve(header_length);
+    header.reserve(current_time_bytes.size() + 1 + topic.size() + 1 + type.size() + 1);
 
     header.insert(header.end(), current_time_bytes.begin(), current_time_bytes.end());
+    header.push_back(compressed ? 1 : 0);
 
     header.insert(header.end(), topic.begin(), topic.end());
     header.push_back('\0');
